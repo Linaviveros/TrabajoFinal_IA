@@ -1,0 +1,13 @@
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 1
+names: ['placa']
+
+roboflow:
+  workspace: itm-mprof
+  project: placas-colombia
+  version: 2
+  license: MIT
+  url: https://universe.roboflow.com/itm-mprof/placas-colombia/dataset/2

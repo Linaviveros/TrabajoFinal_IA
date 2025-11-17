@@ -1,0 +1,11 @@
+ultralytics
+opencv-python
+easyocr
+numpy
+fastapi
+uvicorn
+python-dotenv
+openai
+transformers
+torch
+pandas
