@@ -103,7 +103,7 @@ def _normalizar_texto(text: str) -> str:
         "¿": "",
         "?": "",
         "¡": "",
-        "!" : "",
+        "!": "",
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -203,7 +203,7 @@ def _detectar_intencion(text: str) -> Tuple[str, float]:
     }
 
     mejor_intencion = "desconocida"
-    mejor_score = 0
+    mejor_score = 0.0
 
     for intencion, palabras_clave in intenciones.items():
         score = 0
@@ -212,13 +212,56 @@ def _detectar_intencion(text: str) -> Tuple[str, float]:
                 score += 1
 
         # Normalizar score por número de palabras clave
-        score_normalizado = score / len(palabras_clave) if palabras_clave else 0
+        score_normalizado = score / len(palabras_clave) if palabras_clave else 0.0
 
         if score_normalizado > mejor_score:
             mejor_score = score_normalizado
             mejor_intencion = intencion
 
     return mejor_intencion, mejor_score
+
+
+def _ultima_infraccion_bd(placa: str) -> Optional[datetime]:
+    """
+    Devuelve la fecha/hora de la última infracción registrada en la tabla `violations`
+    para esa placa, o None si no tiene infracciones históricas.
+
+    Asume una tabla violations con una columna de fecha/hora llamada `ts`.
+    Si en tu DB la columna se llama diferente (por ejemplo `timestamp`),
+    cambia el nombre en la consulta SQL.
+    """
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                """
+                SELECT ts
+                FROM violations
+                WHERE plate = ?
+                ORDER BY ts DESC
+                LIMIT 1
+                """,
+                (placa.upper(),),
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        print(f"[CHATBOT] Error consultando última infracción en BD: {e}")
+        return None
+
+    if not row:
+        return None
+
+    ts_value = row[0]
+    # Puede venir como datetime o como texto ISO
+    if isinstance(ts_value, datetime):
+        return ts_value
+
+    from datetime import datetime as _dt
+
+    try:
+        return _dt.fromisoformat(str(ts_value))
+    except Exception:
+        # Si no se puede parsear, devolvemos None y usamos last_seen como fallback
+        return None
 
 
 def _buscar_en_bd(query: str) -> List[Dict[str, Any]]:
@@ -239,7 +282,7 @@ def _buscar_en_bd(query: str) -> List[Dict[str, Any]]:
             )
             rows = cursor.fetchall()
 
-            resultados = []
+            resultados: List[Dict[str, Any]] = []
             for plate, color, first_seen, last_seen, violations in rows:
                 resultados.append(
                     {
@@ -260,6 +303,7 @@ def _buscar_en_bd(query: str) -> List[Dict[str, Any]]:
 # =================================================
 # 🆕 Cálculo de PRÓXIMO pico y placa para la placa
 # =================================================
+
 
 def _proximo_pico_placa(
     ultimo_digito: Optional[int],
@@ -409,9 +453,7 @@ def _obtener_estado_completo_placa(placa: str) -> Dict[str, Any]:
         )
     else:
         if es_fin_de_semana or es_festivo:
-            motivo_pico = (
-                "Hoy no aplica pico y placa porque es fin de semana o festivo."
-            )
+            motivo_pico = "Hoy no aplica pico y placa porque es fin de semana o festivo."
         else:
             motivo_pico = (
                 f"Hoy la placa {plate_up} NO tiene pico y placa "
@@ -437,6 +479,7 @@ def _obtener_estado_completo_placa(placa: str) -> Dict[str, Any]:
 # =======================================================
 # 🆕 Flujo simple: usuario solo digita la placa en el chat
 # =======================================================
+
 
 def _respuesta_placa_simple(placa: str) -> Dict[str, Any]:
     """
@@ -465,25 +508,53 @@ def _respuesta_placa_simple(placa: str) -> Dict[str, Any]:
     motivo_pico = estado.get("pico_placa_detalle", {}).get("motivo", "")
     mensaje_horario = estado.get("mensaje_horario", "")
     violations = int(estado.get("violations", 0) or 0)
-    last_seen = estado.get("last_seen")
 
-    # Texto de multas con fecha
-    if violations > 0 and last_seen:
+    # 🟥 ¿Está en infracción AHORA MISMO según las reglas?
+    en_infraccion = bool(estado.get("en_infraccion"))
+    hoy_str = _now().strftime("%d/%m/%Y")
+
+    if en_infraccion:
+        texto_estado_actual = (
+            "⚠️ En este momento el sistema indica que el vehículo "
+            "ESTÁ EN INFRACCIÓN de pico y placa (circulando en horario restringido). "
+            f"Esta infracción corresponde al día {hoy_str}."
+        )
+    else:
+        texto_estado_actual = (
+            "En este momento no estás en infracción de pico y placa."
+        )
+
+    # 🔎 Buscar la última infracción HISTÓRICA en la tabla violations
+    ultima_infr_dt = _ultima_infraccion_bd(placa_up)
+    fecha_ultima_str = ultima_infr_dt.strftime("%d/%m/%Y") if ultima_infr_dt else None
+
+    # Construir texto de multas/historial
+    if violations > 0 and fecha_ultima_str:
         texto_multas = (
-            f"Tienes {violations} infracción(es) registrada(s). "
-            f"La última se registró el {last_seen}."
+            f"Tienes {violations} infracción(es) registrada(s) en el historial. "
+            f"La última fue el día {fecha_ultima_str}."
         )
     elif violations > 0:
         texto_multas = (
             f"Tienes {violations} infracción(es) registrada(s) por pico y placa."
         )
     else:
-        texto_multas = "Actualmente no tienes infracciones registradas en el sistema."
+        if en_infraccion:
+            # Caso típico: cámara detectó infracción hoy por primera vez
+            texto_multas = (
+                "Esta es tu primera infracción de pico y placa detectada hoy. "
+                "Aún no hay infracciones históricas registradas en la base de datos."
+            )
+        else:
+            texto_multas = (
+                "Actualmente no tienes infracciones históricas registradas en el sistema."
+            )
 
     respuesta = (
         f"🚗 Placa {placa_up} ({color})\n\n"
         f"{motivo_pico}\n\n"
         f"📍 {mensaje_horario}\n\n"
+        f"🔎 {texto_estado_actual}\n\n"
         f"📊 {texto_multas}\n\n"
         "Si quieres más detalle, puedes preguntarme por ejemplo:\n"
         f"\"¿Tengo multas con la placa {placa_up}?\""
@@ -499,6 +570,7 @@ def _respuesta_placa_simple(placa: str) -> Dict[str, Any]:
 # ======================================
 # 🧩 Construir contexto libre desde la BD
 # ======================================
+
 
 def _construir_contexto_desde_bd(max_registros: int = 200) -> str:
     """
@@ -540,6 +612,7 @@ def _construir_contexto_desde_bd(max_registros: int = 200) -> str:
 # ======================================
 # 🧠 LÓGICA ORIGINAL BASADA EN REGLAS
 # ======================================
+
 
 def _responder_chat_reglas(text: str) -> Dict[str, Any]:
     """
@@ -651,11 +724,28 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
         mensaje_horario = estado.get("mensaje_horario", "")
         violations = estado.get("violations", 0)
 
+        # 🔴 NUEVO: leer si está en infracción justo ahora
+        en_infraccion = bool(estado.get("en_infraccion"))
+        # Fecha de hoy formateada para el mensaje
+        fecha_hoy_str = _now().strftime("%d/%m/%Y")
+
+        if en_infraccion:
+            linea_infraccion = (
+                "⚠️ En este momento el sistema indica que el vehículo "
+                "ESTÁ EN INFRACCIÓN de pico y placa (detectado circulando en horario restringido). "
+                f"Esta infracción corresponde al día {fecha_hoy_str}."
+            )
+        else:
+            linea_infraccion = (
+                "En este momento no estás en infracción de pico y placa."
+            )
+
         respuesta = (
             f"🚗 Placa {placa} ({color})\n\n"
             f"{motivo}\n\n"
             f"📍 {mensaje_horario}\n\n"
-            f"📊 Infracciones: {violations}"
+            f"{linea_infraccion}\n\n"
+            f"📊 Infracciones acumuladas en el sistema: {violations}"
         )
 
         return {
@@ -686,9 +776,7 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
                 "detalle": {},
             }
 
-        dias = [
-            dia for dia, digs in RESTRICCIONES.items() if ultimo in digs
-        ]
+        dias = [dia for dia, digs in RESTRICCIONES.items() if ultimo in digs]
 
         if dias:
             dias_str = ", ".join(dias).lower()
@@ -734,8 +822,8 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
 
             if rows:
                 lineas = ["📋 Placas con infracciones registradas:\n"]
-                for plate, viol in rows:
-                    lineas.append(f"⚠️ {plate}: {viol} infracción(es)")
+                for plate_, viol in rows:
+                    lineas.append(f"⚠️ {plate_}: {viol} infracción(es)")
                 return {
                     "respuesta": "\n".join(lineas),
                     "tipo": "lista_multas",
@@ -784,9 +872,7 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
             }
         else:
             return {
-                "respuesta": (
-                    f"✅ Placa {placa}: Sin infracciones registradas."
-                ),
+                "respuesta": f"✅ Placa {placa}: Sin infracciones registradas.",
                 "tipo": "sin_multas",
                 "detalle": info,
             }
@@ -807,9 +893,7 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
             not info.get("first_seen") and not info.get("last_seen")
         ):
             return {
-                "respuesta": (
-                    f"🔍 No tengo información de color para {placa}."
-                ),
+                "respuesta": f"🔍 No tengo información de color para {placa}.",
                 "tipo": "placa_no_registrada",
                 "detalle": {},
             }
@@ -840,10 +924,10 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
             }
 
         lineas = ["📋 Placas registradas:\n"]
-        for plate, color, viol in rows:
+        for plate_, color_, viol in rows:
             emoji = "⚠️" if viol > 0 else "✅"
             lineas.append(
-                f"{emoji} {plate} ({color or 'N/A'}) - {viol} infracción(es)"
+                f"{emoji} {plate_} ({color_ or 'N/A'}) - {viol} infracción(es)"
             )
 
         return {
@@ -928,6 +1012,7 @@ def _responder_chat_reglas(text: str) -> Dict[str, Any]:
 # 🎯 FUNCIÓN PRINCIPAL CON IA + REGLAS
 # ======================================
 
+
 def responder_chat(text: str) -> Dict[str, Any]:
     """
     Chatbot principal que se expone a FastAPI.
@@ -979,6 +1064,4 @@ def responder_chat(text: str) -> Dict[str, Any]:
     return _responder_chat_reglas(text)
 
 
-# 👇 Export explícito para que main.py pueda hacer:
-#     from chatbot.chatbot import responder_chat
 __all__ = ["responder_chat"]
