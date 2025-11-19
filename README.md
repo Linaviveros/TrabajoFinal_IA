@@ -5,7 +5,7 @@ Ubícate en la carpeta principal del proyecto usando la terminal.
 
 Ejecuta el siguiente comando en Windows:
 
-text
+
 .\venv\Scripts\activate
 Cuando el entorno esté activo, verás el nombre del entorno al inicio de la línea de comandos.​​
 
@@ -32,15 +32,11 @@ Para lanzar el API del proyecto, que probablemente utiliza FastAPI y Uvicorn, ej
 python -m uvicorn api.main:app --reload
 Esto iniciará el servidor en modo recarga automática, ideal para desarrollo y pruebas. El API se encontrará disponible en el puerto y la dirección configurada en tu script principal bajo api.main:app.​
 
-5. Desactivar el entorno virtual (opcional)
-Cuando termines de trabajar, puedes desactivar el entorno ejecutando:
-
-
-deactivate
-Esto restaurará la terminal al estado normal, fuera del entorno virtual.​
+​
 
 Recomendaciones finales
 Si tienes problemas con paquetes o versiones, verifica que activaste correctamente el entorno virtual antes de instalar dependencias.
+Como por ultima recomendacion se tiene que mandar los comandos de activacion de camara y activacion del servicio por terminales diferentes.
 
 Ejecuta siempre los comandos desde la raíz del proyecto.
 
