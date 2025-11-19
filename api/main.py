@@ -518,8 +518,8 @@ def chatbot_ui():
         <div class="chat-card">
             <div class="toolbar">
                 <button type="button" id="btn_clear">🧹 Limpiar chat</button>
-                <button type="button" id="btn_ejemplo1">📅 Dígitos de hoy</button>
-                <button type="button" id="btn_ejemplo2">🚗 Mi placa hoy</button>
+                <button type="button" id="btn_ejemplo1"></button>
+                <button type="button" id="btn_ejemplo2"></button>
             </div>
 
             <div id="messages" class="chat-messages"></div>
